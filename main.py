@@ -30,8 +30,7 @@ class FSEnv(gym.Env):
         self.action_space = Tuple((Discrete(2), Discrete(2), Discrete(2)))
         self.observation_space = Box(low=-np.inf, high=np.inf, shape=(3+2*3,), dtype=np.float32)
 
-        self.car_pose = np.array([0., 0., np.deg2rad(90)])
-        self.goal_pose = np.array([0., 0., 0.])
+        self.reset()
 
         if render:
             self.renderer = StateRenderer()
@@ -56,7 +55,8 @@ class FSEnv(gym.Env):
         return 0, 0, False, {}
 
     def reset(self):
-        return 0
+        self.car_pose = np.array([0., 0., np.deg2rad(90)])
+        self.goal_pose = np.array([0., 0., 0.])
 
     def render(self, mode="human"):
         self.renderer.render_state(self.car_pose)
@@ -66,7 +66,13 @@ if __name__ == "__main__":
     env = FSEnv(render=True)
     env.reset()
 
+    i = 0
     while True:
         env.render()
         env.step(env.action_space.sample())
-        time.sleep(0.5)
+        time.sleep(0.1)
+        if i % 10 == 0:
+            env.reset()
+
+        i += 1
+

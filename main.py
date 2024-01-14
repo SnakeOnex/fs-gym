@@ -51,22 +51,30 @@ class FSEnv(gym.Env):
             speed_action = 0.
 
         if left and not right:
-            steer_action = np.deg2rad(10)
+            steer_action = np.deg2rad(60)
         elif right and not left:
-            steer_action = -np.deg2rad(10)
+            steer_action = -np.deg2rad(60)
         else:
             steer_action = 0.
         self.car_pose += kinematic_model(self.car_pose[2], speed_action, steer_action) * 0.1
 
         # 2. compute reward
         obs = np.concatenate([self.car_pose, cones_world.flatten()])
-        reward = -np.linalg.norm(self.car_pose[:2] - self.goal_pose[:2])
+        start_dist = np.linalg.norm(self.goal_pose[:2] - path[0])
+        curr_dist = np.linalg.norm(self.car_pose[:2] - self.goal_pose[:2])
+        reward = start_dist - curr_dist
+        # reward = -np.linalg.norm(self.car_pose[:2] - self.goal_pose[:2])
+        finished = curr_dist < 0.1
+        if finished:
+            reward = 10.
+
+        truncated = np.linalg.norm(self.car_pose[:2] - self.goal_pose[:2]) > 5.
 
         # Q: what are the return args? (observation, reward, done, info)
         self.text = f"t={self.t}\nreward: {reward:.2f}"
         self.t += 1
 
-        return obs, reward, False, False, {}
+        return obs, reward, finished, truncated, {}
 
     def reset(self, **kwargs):
         self.car_pose = np.array([0., 0., np.deg2rad(90)])
@@ -85,13 +93,14 @@ if __name__ == "__main__":
     # env_name = "CartPole-v1"
     env_name = "FSEnv-v0"
 
-    vec_env = make_vec_env(env_name, n_envs=4)
+    vec_env = make_vec_env(env_name, n_envs=16)
     model = PPO("MlpPolicy", vec_env, verbose=1)
-    model.learn(total_timesteps=200)
-    model.save("ppo_cartpole")
-    del model # remove to demonstrate saving and loading
 
-    model = PPO.load("ppo_cartpole")
+    model.learn(total_timesteps=40000)
+    model.save("ppo_cartpole")
+    # del model # remove to demonstrate saving and loading
+
+    # model = PPO.load("ppo_cartpole")
     # make cartpole render
     # vec_env = model.get_env()
     # vec_env = make_vec_env(env_name, n_envs=1)
@@ -106,11 +115,14 @@ if __name__ == "__main__":
     env = gym.make(env_name, render_mode="human")
     while True:
         obs, info = env.reset()
-        for i in range(100):
+        for i in range(50):
             action, _states = model.predict(obs)
-            obs, rewards, dones, truncated, info = env.step(action)
+            obs, rewards, done, truncated, info = env.step(action)
+            if done:
+                print("done")
+                break
             env.render()
-            time.sleep(0.1)
+            time.sleep(0.05)
 
 
     # env = gym.make("FSEnv-v0", render=False)

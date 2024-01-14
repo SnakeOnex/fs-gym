@@ -127,15 +127,15 @@ class StateRenderer:
         for line in self.loc_static_lines: self.local_ax.draw_artist(line)
         self.local_static_background = self.fig.canvas.copy_from_bbox(self.local_ax.bbox)
 
-    def render_state(self, car_pose):
+    def render_state(self, car_pose, text):
         # start = time.time()
         self.fig.canvas.restore_region(self.global_static_background)
         self.fig.canvas.restore_region(self.local_static_background)
         # obs = self.state.get_obs()
 
         # # plot text fast
-        # self.glob_text.set_text(text)
-        # self.global_ax.draw_artist(self.glob_text)
+        self.glob_text.set_text(text)
+        self.global_ax.draw_artist(self.glob_text)
 
         # global state
         # if draw_extra is not None:

@@ -14,6 +14,8 @@ path = np.array([[0., 0.],
                  [0., 1.],
                  [-2., 2.],])
 
+map = {"cones_world": cones_world, "path": path, "start_pose": np.array([0., 0., np.deg2rad(90)])}
+
 def kinematic_model(yaw, speed, delta_f):
     lr = 0.75
     wheel_base = 1.5
@@ -25,18 +27,20 @@ def kinematic_model(yaw, speed, delta_f):
     return np.array(der)
 
 class FSEnv(gym.Env):
-    def __init__(self, render_mode="none"):
-        # self.action_space = Discrete(3) # forward, left, right
-        # self.action_space = Tuple((Discrete(2), Discrete(2), Discrete(2)))
+    def __init__(self, map=map, render_mode="none"):
+        self.car_pose = map["start_pose"]
+        self.cones_world = map["cones_world"]
+        self.path = map["path"]
+
         self.action_space = MultiDiscrete([2, 2, 2])
-        self.observation_space = Box(low=-np.inf, high=np.inf, shape=(3+4*3,), dtype=np.float32)
+        self.observation_space = Box(low=-np.inf, high=np.inf, shape=(3+self.cones_world.shape[0]*3,), dtype=np.float32)
 
         self.reset()
 
         if render_mode == "human":
             self.renderer = StateRenderer()
-            self.renderer.set_state({"cones_world": cones_world, "path": path, "start_pose": self.car_pose.copy()})
-        self.goal_pose = path[-1]
+            self.renderer.set_state({"cones_world": self.cones_world, "path": self.path, "start_pose": self.car_pose.copy()})
+        self.goal_pose = self.path[-1]
 
         self.text = ""
         self.t = 0
@@ -59,12 +63,12 @@ class FSEnv(gym.Env):
         self.car_pose += kinematic_model(self.car_pose[2], speed_action, steer_action) * 0.1
 
         # 2. compute reward
-        obs = np.concatenate([self.car_pose, cones_world.flatten()])
-        start_dist = np.linalg.norm(self.goal_pose[:2] - path[0])
+        obs = np.concatenate([self.car_pose, self.cones_world.flatten()])
+        start_dist = np.linalg.norm(self.goal_pose[:2] - self.path[0])
         curr_dist = np.linalg.norm(self.car_pose[:2] - self.goal_pose[:2])
         reward = start_dist - curr_dist
         # reward = -np.linalg.norm(self.car_pose[:2] - self.goal_pose[:2])
-        finished = curr_dist < 0.1
+        finished = curr_dist < 0.2
         if finished:
             reward = 10.
 
@@ -79,7 +83,7 @@ class FSEnv(gym.Env):
     def reset(self, **kwargs):
         self.car_pose = np.array([0., 0., np.deg2rad(90)])
         self.t = 0
-        return np.concatenate([self.car_pose, cones_world.flatten()]), {}
+        return np.concatenate([self.car_pose, self.cones_world.flatten()]), {}
 
     def render(self, mode="human"):
         self.renderer.render_state(self.car_pose, self.text)
@@ -96,43 +100,20 @@ if __name__ == "__main__":
     vec_env = make_vec_env(env_name, n_envs=16)
     model = PPO("MlpPolicy", vec_env, verbose=1)
 
-    model.learn(total_timesteps=40000)
-    model.save("ppo_cartpole")
+    # model.learn(total_timesteps=40000)
+    # model.save("ppo_cartpole")
     # del model # remove to demonstrate saving and loading
 
-    # model = PPO.load("ppo_cartpole")
-    # make cartpole render
-    # vec_env = model.get_env()
-    # vec_env = make_vec_env(env_name, n_envs=1)
-    # # env = gym.make(env_name, render_mode="human")
-    # obs = vec_env.reset()
-
-    # for i in range(1000):
-        # action, _states = model.predict(obs)
-        # obs, rewards, dones, info = vec_env.step(action)
-        # vec_env.render("human")
+    model = PPO.load("ppo_cartpole")
 
     env = gym.make(env_name, render_mode="human")
     while True:
         obs, info = env.reset()
-        for i in range(50):
+        for i in range(100):
             action, _states = model.predict(obs)
             obs, rewards, done, truncated, info = env.step(action)
             if done:
                 print("done")
-                break
+                exit(0)
             env.render()
-            time.sleep(0.05)
-
-
-    # env = gym.make("FSEnv-v0", render=False)
-    # i = 0
-    # while True:
-        # # env.render()
-        # env.step(env.action_space.sample())
-        # # time.sleep(0.1)
-        # if i % 10 == 0:
-            # env.reset()
-
-        # i += 1
-
+            # time.sleep(0.1)

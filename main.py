@@ -1,6 +1,7 @@
 import numpy as np
 import time
 import gymnasium as gym
+import pickle
 from gymnasium.spaces import Box, Discrete, Tuple, MultiDiscrete
 
 from renderer import StateRenderer
@@ -17,6 +18,24 @@ path = np.array([[0., 0.],
                  [0., 4.],])
 
 basic_map = {"cones_world": cones_world, "path": path, "start_pose": np.array([0., 0., np.deg2rad(90)])}
+
+data = pickle.load(open("skidpad_single_pass.pkl", "rb")) 
+cones_world = np.zeros((0,3)) 
+
+def colored_to_world_cones(cones, color):
+    cones = np.hstack((cones, np.ones((cones.shape[0], 1)) * color))
+    return cones
+
+yellow_cones = colored_to_world_cones(data["yellow_cones"], 0)
+blue_cones = colored_to_world_cones(data["blue_cones"], 1)
+orange_cones = colored_to_world_cones(data["orange_cones"], 2)
+cones_world = np.vstack((yellow_cones, blue_cones, orange_cones))
+path = data["center_line"]
+path = path[40:, :]
+
+path = path[::1, :]
+
+skidpad_map = {"cones_world": cones_world, "path": path, "start_pose": np.array([-10., 0., np.deg2rad(90)])}
 
 def kinematic_model(yaw, speed, delta_f):
     lr = 0.75
@@ -36,6 +55,8 @@ class FSEnv(gym.Env):
         self.car_pose = map["start_pose"]
         self.cones_world = map["cones_world"]
         self.path = map["path"]
+        self.path_idx = 0
+        self.path_sum = 0.
 
         self.action_space = MultiDiscrete([2, 2, 2])
         self.observation_space = Box(low=-np.inf, high=np.inf, shape=(3+self.cones_world.shape[0]*3,), dtype=np.float32)
@@ -62,28 +83,37 @@ class FSEnv(gym.Env):
             steer_action = -np.deg2rad(60)
         else:
             steer_action = 0.
-        self.car_pose += kinematic_model(self.car_pose[2], speed_action, steer_action) * 0.1
+        self.car_pose += kinematic_model(self.car_pose[2], speed_action, steer_action) * 0.2
+
+        # update path
+        if np.linalg.norm(self.car_pose[:2] - self.path[self.path_idx]) < 1.0:
+            self.path_idx += 1
+            self.path_sum += np.linalg.norm(self.path[self.path_idx] - self.path[self.path_idx-1])
 
         # 2. compute reward
+        dist_to_road = np.min(np.linalg.norm(self.car_pose[:2] - self.path, axis=1))
         obs = np.concatenate([self.car_pose, self.cones_world.flatten()])
         start_dist = np.linalg.norm(self.goal_pose[:2] - self.path[0])
         curr_dist = np.linalg.norm(self.car_pose[:2] - self.goal_pose[:2])
-        reward = start_dist - curr_dist
+        # reward = start_dist - curr_dist
+        reward = self.path_sum - dist_to_road
         finished = curr_dist < 0.2
         if finished:
-            reward = 10.
+            reward = 100.
 
-        truncated = np.linalg.norm(self.car_pose[:2] - self.goal_pose[:2]) > 5.
+        truncated = dist_to_road > 2.0
 
         # Q: what are the return args? (observation, reward, done, info)
-        self.text = f"t={self.t}\nreward: {reward:.2f}"
+        self.text = f"t={self.t}\nreward: {reward:.2f}\n{self.path_idx=}, {self.path_sum=:.2f}\n"
         self.t += 1
 
         return obs, reward, finished, truncated, {}
 
     def reset(self, **kwargs):
-        self.car_pose = np.array([0., 0., np.deg2rad(90)])
+        self.car_pose = np.array([*self.path[0], np.deg2rad(90)])
         self.t = 0
+        self.path_idx = 0
+        self.path_sum = 0.
         return np.concatenate([self.car_pose, self.cones_world.flatten()]), {}
 
     def render(self, mode="human"):
@@ -96,17 +126,22 @@ gym.envs.register(id="FSBasic-v0",
                   entry_point=FSEnv,
                   kwargs={"map": basic_map})
 
+gym.envs.register(id="FSSkidpad-v0",
+                  entry_point=FSEnv,
+                  kwargs={"map": skidpad_map})
+
 if __name__ == "__main__":
     from stable_baselines3 import PPO
     from stable_baselines3.common.env_util import make_vec_env
 
     # env_name = "CartPole-v1"
-    env_name = "FSBasic-v0"
+    # env_name = "FSBasic-v0"
+    env_name = "FSSkidpad-v0"
 
-    # vec_env = make_vec_env(env_name, n_envs=16)
+    # vec_env = make_vec_env(env_name, n_envs=8)
     # model = PPO("MlpPolicy", vec_env, verbose=1)
 
-    # model.learn(total_timesteps=40000)
+    # model.learn(total_timesteps=60000)
     # model.save("ppo_cartpole")
     # del model # remove to demonstrate saving and loading
 
@@ -115,12 +150,17 @@ if __name__ == "__main__":
     env = gym.make(env_name)
     while True:
         obs, info = env.reset()
-        for i in range(100):
-            # action, _states = model.predict(obs)
-            action = env.action_space.sample()
+        for i in range(200):
+            action, _states = model.predict(obs)
+            # action = env.action_space.sample()
             obs, rewards, done, truncated, info = env.step(action)
             if done:
                 print("done")
                 exit(0)
+
+            # if truncated:
+                # print("truncated")
+                # exit(0)
+
             env.render()
             # time.sleep(0.1)

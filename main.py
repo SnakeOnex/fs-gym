@@ -1,8 +1,12 @@
 import numpy as np
+import argparse
+from pathlib import Path
 import time
 import gymnasium as gym
 import pickle
 from gymnasium.spaces import Box, Discrete, Tuple, MultiDiscrete
+from stable_baselines3 import PPO
+from stable_baselines3.common.env_util import make_vec_env
 
 from renderer import StateRenderer
 
@@ -35,7 +39,21 @@ path = path[40:, :]
 
 path = path[::1, :]
 
-skidpad_map = {"cones_world": cones_world, "path": path, "start_pose": np.array([-10., 0., np.deg2rad(90)])}
+skidpad_map = {"cones_world": cones_world, "path": path, "start_pose": np.array([*path[0], np.deg2rad(90)])}
+
+# autox map
+tracks_path = Path("/home/snake/fun/bros/data/e2e/tracks_dataset.pkl")
+tracks = pickle.load(open(tracks_path, "rb"))
+track = tracks[0]
+
+cones_world = np.zeros((0,3))
+yellow_cones = colored_to_world_cones(track["yellow_cones"], 0)
+blue_cones = colored_to_world_cones(track["blue_cones"], 1)
+cones_world = np.vstack((yellow_cones, blue_cones))
+path = track["center_line"]
+
+autox_map = {"cones_world": cones_world, "path": path, "start_pose": np.array([*path[0], np.deg2rad(90)])}
+
 
 def kinematic_model(yaw, speed, delta_f):
     lr = 0.75
@@ -130,20 +148,25 @@ gym.envs.register(id="FSSkidpad-v0",
                   entry_point=FSEnv,
                   kwargs={"map": skidpad_map})
 
+gym.envs.register(id="FSAutox-v0",
+                  entry_point=FSEnv,
+                  kwargs={"map": autox_map})
+
 if __name__ == "__main__":
-    from stable_baselines3 import PPO
-    from stable_baselines3.common.env_util import make_vec_env
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument("--train", action="store_true")
+    args = arg_parser.parse_args()
 
     # env_name = "CartPole-v1"
     # env_name = "FSBasic-v0"
     env_name = "FSSkidpad-v0"
+    # env_name = "FSAutox-v0"
 
-    # vec_env = make_vec_env(env_name, n_envs=8)
-    # model = PPO("MlpPolicy", vec_env, verbose=1)
-
-    # model.learn(total_timesteps=60000)
-    # model.save("ppo_cartpole")
-    # del model # remove to demonstrate saving and loading
+    if args.train:
+        vec_env = make_vec_env(env_name, n_envs=8)
+        model = PPO("MlpPolicy", vec_env, verbose=1)
+        model.learn(total_timesteps=60000)
+        model.save("ppo_cartpole")
 
     model = PPO.load("ppo_cartpole")
 
@@ -151,15 +174,15 @@ if __name__ == "__main__":
     while True:
         obs, info = env.reset()
         for i in range(200):
-            action, _states = model.predict(obs)
-            # action = env.action_space.sample()
+            # action, _states = model.predict(obs)
+            action = env.action_space.sample()
             obs, rewards, done, truncated, info = env.step(action)
             if done:
                 print("done")
                 exit(0)
 
-            # if truncated:
-                # print("truncated")
+            if truncated:
+                print("truncated")
                 # exit(0)
 
             env.render()

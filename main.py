@@ -5,16 +5,18 @@ from gymnasium.spaces import Box, Discrete, Tuple, MultiDiscrete
 
 from renderer import StateRenderer
 
-cones_world = np.array([[-1., 1., 0.],
+cones_world = np.array([[-1., 1., 1.],
                         [ 1., 1., 0.],
-                        [-1., 2., 0.],
+                        [-1., 2., 1.],
                         [ 1., 2., 0.],])
 
 path = np.array([[0., 0.],
                  [0., 1.],
-                 [-2., 2.],])
+                 [0., 2.],
+                 [0., 3.],
+                 [0., 4.],])
 
-map = {"cones_world": cones_world, "path": path, "start_pose": np.array([0., 0., np.deg2rad(90)])}
+basic_map = {"cones_world": cones_world, "path": path, "start_pose": np.array([0., 0., np.deg2rad(90)])}
 
 def kinematic_model(yaw, speed, delta_f):
     lr = 0.75
@@ -27,7 +29,10 @@ def kinematic_model(yaw, speed, delta_f):
     return np.array(der)
 
 class FSEnv(gym.Env):
-    def __init__(self, map=map, render_mode="none"):
+    def __init__(self, map):
+        self.map = map
+        self.renderer = None
+
         self.car_pose = map["start_pose"]
         self.cones_world = map["cones_world"]
         self.path = map["path"]
@@ -37,9 +42,6 @@ class FSEnv(gym.Env):
 
         self.reset()
 
-        if render_mode == "human":
-            self.renderer = StateRenderer()
-            self.renderer.set_state({"cones_world": self.cones_world, "path": self.path, "start_pose": self.car_pose.copy()})
         self.goal_pose = self.path[-1]
 
         self.text = ""
@@ -67,7 +69,6 @@ class FSEnv(gym.Env):
         start_dist = np.linalg.norm(self.goal_pose[:2] - self.path[0])
         curr_dist = np.linalg.norm(self.car_pose[:2] - self.goal_pose[:2])
         reward = start_dist - curr_dist
-        # reward = -np.linalg.norm(self.car_pose[:2] - self.goal_pose[:2])
         finished = curr_dist < 0.2
         if finished:
             reward = 10.
@@ -86,19 +87,24 @@ class FSEnv(gym.Env):
         return np.concatenate([self.car_pose, self.cones_world.flatten()]), {}
 
     def render(self, mode="human"):
+        if self.renderer is None:
+            self.renderer = StateRenderer()
+            self.renderer.set_state(self.map)
         self.renderer.render_state(self.car_pose, self.text)
 
-gym.envs.register(id="FSEnv-v0", entry_point=FSEnv)
+gym.envs.register(id="FSBasic-v0",
+                  entry_point=FSEnv,
+                  kwargs={"map": basic_map})
 
 if __name__ == "__main__":
     from stable_baselines3 import PPO
     from stable_baselines3.common.env_util import make_vec_env
 
     # env_name = "CartPole-v1"
-    env_name = "FSEnv-v0"
+    env_name = "FSBasic-v0"
 
-    vec_env = make_vec_env(env_name, n_envs=16)
-    model = PPO("MlpPolicy", vec_env, verbose=1)
+    # vec_env = make_vec_env(env_name, n_envs=16)
+    # model = PPO("MlpPolicy", vec_env, verbose=1)
 
     # model.learn(total_timesteps=40000)
     # model.save("ppo_cartpole")
@@ -106,11 +112,12 @@ if __name__ == "__main__":
 
     model = PPO.load("ppo_cartpole")
 
-    env = gym.make(env_name, render_mode="human")
+    env = gym.make(env_name)
     while True:
         obs, info = env.reset()
         for i in range(100):
-            action, _states = model.predict(obs)
+            # action, _states = model.predict(obs)
+            action = env.action_space.sample()
             obs, rewards, done, truncated, info = env.step(action)
             if done:
                 print("done")
